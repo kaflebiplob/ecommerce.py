@@ -1,5 +1,7 @@
 from django.shortcuts import render
 from .models import *
+from django.http import JsonResponse
+import json
 
 def store(request):
     products = Product.objects.all()
@@ -67,3 +69,44 @@ def checkout(request):
     
     return render(request, 'store/checkout.html', context)
 
+def updateItem(request):
+    data = json.loads(request.body)
+    productId = data['productId']
+    action = data['action']
+    
+    print('Action:', action)
+    print('Product:', productId)
+    
+    user = request.user
+    customer = user.customer
+    product = Product.objects.get(id=productId)
+    
+    # Handle multiple incomplete orders - get or create the most recent one
+    try:
+        order = Order.objects.filter(customer=customer, complete=False).latest('date_ordered')
+    except Order.DoesNotExist:
+        order = Order.objects.create(customer=customer, complete=False)
+    
+    # Alternative approach: Clean up duplicates and then get_or_create
+    # Order.objects.filter(customer=customer, complete=False).exclude(
+    #     id=Order.objects.filter(customer=customer, complete=False).latest('date_ordered').id
+    # ).delete()
+    # order, created = Order.objects.get_or_create(customer=customer, complete=False)
+    
+    orderItem, created = OrderItem.objects.get_or_create(
+        order=order,
+        product=product,
+        defaults={'quantity': 0}
+    )
+    
+    if action == 'add':
+        orderItem.quantity = (orderItem.quantity + 1)
+    elif action == 'remove':
+        orderItem.quantity = (orderItem.quantity - 1)
+    
+    orderItem.save()
+    
+    if orderItem.quantity <= 0:
+        orderItem.delete()
+    
+    return JsonResponse('Item was added', safe=False)
